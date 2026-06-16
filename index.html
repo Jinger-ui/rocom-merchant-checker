@@ -637,6 +637,82 @@ body {
 @media (min-width: 1200px) {
   .goods-grid { grid-template-columns: repeat(4, 1fr); }
 }
+
+/* ========== 推送控制区 ========== */
+.push-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.push-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.92em;
+  color: var(--text-dark);
+}
+.push-toggle__track {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: rgba(139,111,246,0.18);
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+.push-toggle__track::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+  transition: var(--transition);
+}
+.push-toggle.active .push-toggle__track {
+  background: linear-gradient(135deg, var(--magic-purple), var(--gem-blue));
+}
+.push-toggle.active .push-toggle__track::after {
+  left: 23px;
+}
+
+.push-status {
+  font-size: 0.85em;
+  padding: 6px 14px;
+  border-radius: 20px;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  animation: fadeInUp 0.3s ease;
+}
+.push-status.active { display: inline-flex; }
+.push-status--ok {
+  background: rgba(92,184,92,0.12);
+  color: #3d8b3d;
+}
+.push-status--fail {
+  background: var(--error-bg);
+  color: #9e5555;
+}
+.push-status--skip {
+  background: rgba(139,111,246,0.08);
+  color: var(--text-muted);
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 </style>
 </head>
 <body>
@@ -692,6 +768,15 @@ body {
     <button class="btn btn-secondary" id="btnRefresh" onclick="queryMerchant(true)">
       ↻ 强制刷新数据
     </button>
+  </div>
+
+  <!-- 推送控制区 -->
+  <div class="push-bar">
+    <label class="push-toggle" id="pushToggle" onclick="togglePush()">
+      <span class="push-toggle__track"></span>
+      <span>查询后推送到微信</span>
+    </label>
+    <span class="push-status" id="pushStatus"></span>
   </div>
 
   <!-- 错误提示 -->
@@ -760,6 +845,7 @@ var API_BASE = '/api/merchant';
 
 /* ========== 状态 ========== */
 var rawResponseData = null;
+var pushEnabled = false;
 
 /* ========== DOM 引用 ========== */
 var $btnQuery   = document.getElementById('btnQuery');
@@ -1065,12 +1151,29 @@ function setButtonsDisabled(disabled) {
   }
 }
 
+/* ========== 推送开关 ========== */
+var $pushToggle = document.getElementById('pushToggle');
+var $pushStatus = document.getElementById('pushStatus');
+
+function togglePush() {
+  pushEnabled = !pushEnabled;
+  $pushToggle.classList.toggle('active', pushEnabled);
+}
+
+function showPushStatus(type, text) {
+  $pushStatus.className = 'push-status active push-status--' + type;
+  $pushStatus.textContent = text;
+  setTimeout(function() { $pushStatus.classList.remove('active'); }, 8000);
+}
+
 /* ========== 主查询函数 ========== */
 function queryMerchant(forceRefresh) {
   setButtonsDisabled(true);
   showLoading();
+  $pushStatus.classList.remove('active');
 
   var url = API_BASE + '?refresh=' + (forceRefresh ? 'true' : 'false');
+  if (pushEnabled) url += '&push=true';
 
   fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' } })
   .then(function(response) {
@@ -1124,6 +1227,18 @@ function queryMerchant(forceRefresh) {
       $errorBox.classList.remove('active');
       renderGoods(items);
       showDebugPanel(json);
+    }
+
+    // 处理推送状态
+    var ps = json.pushStatus;
+    if (ps) {
+      if (ps.success) {
+        showPushStatus('ok', '✓ 已推送到微信');
+      } else if (ps.reason === 'not_configured') {
+        showPushStatus('skip', '未配置 SendKey，推送已跳过');
+      } else {
+        showPushStatus('fail', '推送失败：' + (ps.reason || '未知错误'));
+      }
     }
 
     $updateTime.textContent = formatDateTime(new Date());
