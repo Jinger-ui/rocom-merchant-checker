@@ -181,6 +181,114 @@ app.get('/api/merchant', async (req, res) => {
   }
 });
 
+/* ========== 定时自动推送 ========== */
+
+const ROUND_HOURS = [8, 12, 16, 20];
+const ROUND_LABELS = ['第1轮', '第2轮', '第3轮', '第4轮'];
+const RETRY_DELAY_MS = 2 * 60 * 1000;
+const MAX_RETRIES = 3;
+
+async function fetchAndPush(roundIndex, attempt) {
+  if (!API_KEY || !process.env.SERVER_CHAN_SENDKEY) return;
+
+  const label = ROUND_LABELS[roundIndex];
+  const hour = ROUND_HOURS[roundIndex];
+  console.log(`[定时推送] ${label}（${hour}:00）第 ${attempt} 次尝试...`);
+
+  try {
+    const resp = await fetch(`${UPSTREAM}?refresh=true`, {
+      headers: {
+        'X-API-Key': API_KEY,
+        'Authorization': API_KEY,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!resp.ok) {
+      console.warn(`[定时推送] API 返回 HTTP ${resp.status}`);
+      if (attempt < MAX_RETRIES) {
+        console.log(`[定时推送] ${RETRY_DELAY_MS / 1000}s 后重试...`);
+        setTimeout(() => fetchAndPush(roundIndex, attempt + 1), RETRY_DELAY_MS);
+      }
+      return;
+    }
+
+    const data = await resp.json();
+    if (data.code !== undefined && data.code !== 0) {
+      console.warn(`[定时推送] API 业务错误: ${data.message}`);
+      if (attempt < MAX_RETRIES) {
+        setTimeout(() => fetchAndPush(roundIndex, attempt + 1), RETRY_DELAY_MS);
+      }
+      return;
+    }
+
+    const markdown = formatItemsMarkdown(data);
+    if (!markdown) {
+      console.warn('[定时推送] 无商品数据');
+      if (attempt < MAX_RETRIES) {
+        setTimeout(() => fetchAndPush(roundIndex, attempt + 1), RETRY_DELAY_MS);
+      }
+      return;
+    }
+
+    const title = `洛克王国远行商人 ${label}（${hour}:00）`;
+    const result = await sendToWechat(title, markdown);
+    if (result.success) {
+      console.log(`[定时推送] ${label} 推送成功`);
+    } else {
+      console.warn(`[定时推送] ${label} 推送失败: ${result.reason}`);
+    }
+  } catch (err) {
+    console.error(`[定时推送] 请求异常: ${err.message}`);
+    if (attempt < MAX_RETRIES) {
+      setTimeout(() => fetchAndPush(roundIndex, attempt + 1), RETRY_DELAY_MS);
+    }
+  }
+}
+
+function scheduleRounds() {
+  if (!API_KEY) {
+    console.warn('[定时推送] 未配置 ROCOM_API_KEY，定时推送不可用');
+    return;
+  }
+  if (!process.env.SERVER_CHAN_SENDKEY) {
+    console.warn('[定时推送] 未配置 SERVER_CHAN_SENDKEY，定时推送不可用');
+    return;
+  }
+
+  function tick() {
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+
+    for (let i = 0; i < ROUND_HOURS.length; i++) {
+      // 在整点后 1 分钟触发（给 API 一点缓冲时间）
+      if (h === ROUND_HOURS[i] && m === 1) {
+        fetchAndPush(i, 1);
+      }
+    }
+  }
+
+  // 每 60 秒检查一次是否到了推送时间
+  setInterval(tick, 60 * 1000);
+
+  // 启动时立即检查，如果当前恰好在某个轮次的前几分钟内，也触发一次
+  const now = new Date();
+  const h = now.getHours();
+  const m = now.getMinutes();
+  for (let i = 0; i < ROUND_HOURS.length; i++) {
+    if (h === ROUND_HOURS[i] && m <= 5) {
+      console.log(`[定时推送] 启动时检测到当前正处于 ${ROUND_LABELS[i]} 时段，立即推送`);
+      fetchAndPush(i, 1);
+      break;
+    }
+  }
+
+  console.log('[定时推送] 定时任务已启动，将在 08:01 / 12:01 / 16:01 / 20:01 自动推送');
+}
+
+/* ========== 启动服务 ========== */
+
 app.listen(PORT, () => {
   console.log(`洛克王国旅行商人查询服务已启动: http://localhost:${PORT}`);
   if (!API_KEY) {
@@ -189,4 +297,5 @@ app.listen(PORT, () => {
   if (!process.env.SERVER_CHAN_SENDKEY) {
     console.warn('⚠ 未配置 SERVER_CHAN_SENDKEY，微信推送功能不可用。');
   }
+  scheduleRounds();
 });
