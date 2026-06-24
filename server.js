@@ -48,6 +48,21 @@ function formatItemsMarkdown(apiData) {
   const data = apiData.data || apiData;
   let items = [];
 
+  // 从 random_goods 构建名称 -> 价格/限购 映射
+  const goodsLookup = {};
+  const randomGoods = data.random_goods || data.randomGoods || [];
+  if (Array.isArray(randomGoods)) {
+    for (const g of randomGoods) {
+      const key = (g.goods_name || g.name || '').trim();
+      if (key) {
+        goodsLookup[key] = {
+          price: g.price || g.origin_price || null,
+          limit: g.buy_limit_num || g.buyLimit || null
+        };
+      }
+    }
+  }
+
   // 路径 1：merchantActivities[].get_props[]
   const activities = data.merchantActivities || data.merchant_activities || data.activities;
   if (Array.isArray(activities)) {
@@ -87,8 +102,9 @@ function formatItemsMarkdown(apiData) {
 
   const lines = list.map(raw => {
     const name = raw.name || raw.title || raw.itemName || raw.goodsName || '未知商品';
-    const price = raw.price || raw.cost || raw.value || raw.need || null;
-    const limit = raw.limit || raw.buyLimit || raw.buy_limit || raw.stock || raw.max || null;
+    const extra = goodsLookup[name] || {};
+    const price = raw.price || raw.cost || raw.value || raw.need || extra.price || null;
+    const limit = raw.limit || raw.buyLimit || raw.buy_limit || raw.stock || raw.max || extra.limit || null;
     const start = raw.start_time || raw.startTime || 0;
     const end = raw.end_time || raw.endTime || 0;
 

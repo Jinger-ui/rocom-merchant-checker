@@ -912,7 +912,23 @@ function normalizeMerchantData(data) {
 
   var items = [];
 
-  // 路径 1：data.merchantActivities[].get_props[] （已确认的主结构）
+  // 从 random_goods 构建名称 -> 价格/限购 映射（该字段含完整商品信息）
+  var goodsLookup = {};
+  var randomGoods = data.random_goods || data.randomGoods || [];
+  if (Array.isArray(randomGoods)) {
+    randomGoods.forEach(function(g) {
+      var key = (g.goods_name || g.name || '').trim();
+      if (key) {
+        goodsLookup[key] = {
+          price: g.price || g.origin_price || null,
+          limit: g.buy_limit_num || g.buyLimit || null,
+          itemId: g.item_id || g.id || null
+        };
+      }
+    });
+  }
+
+  // 路径 1：data.merchantActivities[].get_props[]（已确认的主结构）
   var activities = data.merchantActivities || data.merchant_activities || data.activities;
   if (Array.isArray(activities)) {
     activities.forEach(function(act) {
@@ -936,12 +952,15 @@ function normalizeMerchantData(data) {
     items = data;
   }
 
-  // 对每个商品进行字段标准化
+  // 对每个商品进行字段标准化，并用 random_goods 补全价格/限购
   return items.map(function(raw) {
+    var name = raw.name || raw.title || raw.itemName || raw.goodsName || raw.item_name || raw.goods_name || '未知商品';
+    var extra = goodsLookup[name] || {};
+
     return {
-      name:      raw.name || raw.title || raw.itemName || raw.goodsName || raw.item_name || raw.goods_name || '未知商品',
-      price:     raw.price || raw.cost || raw.value || raw.need || null,
-      limit:     raw.limit || raw.buyLimit || raw.buy_limit || raw.stock || raw.max || null,
+      name:      name,
+      price:     raw.price || raw.cost || raw.value || raw.need || extra.price || null,
+      limit:     raw.limit || raw.buyLimit || raw.buy_limit || raw.stock || raw.max || extra.limit || null,
       image:     raw.image || raw.icon || raw.img || raw.imgUrl || raw.iconUrl || raw.img_url || raw.icon_url || null,
       desc:      raw.desc || raw.description || raw.type || raw.category || null,
       startTime: raw.start_time || raw.startTime || raw.begin_time || raw.beginTime || 0,
